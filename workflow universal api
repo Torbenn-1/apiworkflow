@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<Workflow name="BITSIGHT" version="1.0" xmlns="http://qradar.ibm.com/UniversalCloudRESTAPI/Workflow/V1">
+
+  <!-- PARAMETROS {{{ -->
+  <Parameters>
+    <Parameter name="host"              label="HostTest"            required="true" />
+    <Parameter name="bitsight_url"      label="bitsightUrl"         required="true" />
+    <Parameter name="token"             label="Token"               required="true" />
+    <Parameter name="qradar_console"    label="QradarConsole"       required="true" />
+    <Parameter name="qradar_token"      label="QradarToken"         required="true" />
+    <Parameter name="qradar_rs"         label="QradarReferenceSet"  required="true" />
+    <Parameter name="qradar_identifier" label="QradarIdentifier"    required="true" />
+    <Parameter name="logPrefix"         label="LogPrefix"           required="true" />
+  </Parameters>
+  <!-- }}} -->
+
+  <Actions>
+
+    <!-- LIMPA EXECUCOES ANTERIORES {{{ -->
+    <Delete path="/get_events/response" />
+    <!-- }}} -->
+
+    <!-- COLETA DADOS DO BITSIGHTTECH {{{ -->
+    <Log type="INFO" message="${/logPrefix}: Coleta de Dados BITSIGHTTECH" />
+    <CallEndpoint url="${/bitsight_url}" method="GET" savePath="/get_events/response">
+      <RequestHeader name="Authorization" value="Basic ${/token}" />
+    </CallEndpoint>
+    <!-- }}} -->
+
+    <!-- HANDLE ERRORS {{{ -->
+    <If condition="/get_events/response/status_code != 200">
+      <Abort reason="Erro de AUTENTICACAO " />
+    </If>
+    <!-- }}} -->
+
+    <!-- EXISTE REGISTROS ? {{{ -->
+    <If condition="/get_events/response/body/count > 0" >
+      <Log type="INFO" message="${/logPrefix}: ${/get_events/response/body/count } para processar" />
+    </If>
+    <Else>
+      <Abort reason="Sem Eventos para processar no periodo" />
+    </Else>
+    <!-- }}} -->
+
+
+
+    <!-- LE EVENTOS E ENVIADO PARA QRADAR {{{ -->
+    <ForEach item="/current_event" items="/get_events/response/body/results">
+
+    <!-- CONSULTA REFERENCE SET USANDO O TEMPORARY_ID {{{ -->
+      <Set path="/URL"  value="https://${/qradar_console}/api/reference_data/sets/${/qradar_rs}?fields=data&amp;filter=value%20%3D%20%22${/current_event/temporary_id}%22" />
+
+      <CallEndpoint url="${/URL}" method="GET" savePath="/qradar_rs">
+        <SSLConfiguration allowUntrustedServerCertificate="true" />
+        <RequestHeader name="SEC" value="${/qradar_token}" />
+        <RequestHeader name="Accept" value="application/json" />
+        <RequestHeader name="Version" value="20.0" />
+      </CallEndpoint>
+      <Log type="INFO" message="${/logPrefix}: Consulta -> ${/qradar_rs/body}" />
+      <!-- }}} -->
+
+    <!-- INI - Teste {{{ -->
+    <!-- <Abort reason="${/qradar_rs}" /> -->
+    <!-- END - Teste {{{ -->
+
+
+      <!-- ENVIA PARA QRADAR {{{ -->
+      <If condition="/qradar_rs/body/data = null">
+       <PostEvent path="/current_event" source="identificador_unico" />
+        <Log type="INFO" message="${/logPrefix}: enviado para Qradar ${/current_event}" />
+      <!-- }}} -->
+
+        <!-- UPDATE RS NAO PARA DUPLICAR {{{ -->
+        <Set path="/URL_UPDATE"  value="https://${/qradar_console}/api/reference_data/sets/${/qradar_rs}?value=${/current_event/temporary_id}" />
+        <CallEndpoint url="${/URL_UPDATE}" method="POST" savePath="/ultimo_cadastro_rs">
+          <SSLConfiguration allowUntrustedServerCertificate="true" />
+          <RequestHeader name="SEC" value="${/qradar_token}" />
+          <RequestHeader name="Accept" value="application/json" />
+          <RequestHeader name="Version" value="20.0" />
+        </CallEndpoint>
+      </If>
+        <!-- }}} -->
+    </ForEach>
+    <!-- }}} -->
+  </Actions>
+
+    <Tests>
+        <DNSResolutionTest host="${/host}" />
+        <TCPConnectionTest host="${/host}" />
+        <SSLHandshakeTest host="${/host}" />
+        <HTTPConnectionThroughProxyTest url="https://${/host}" />
+    </Tests>
+
+</Workflow>
